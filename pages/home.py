@@ -7,6 +7,13 @@ import authentification
 import dash_bootstrap_components as dbc
 from textblob import TextBlob
 from textblob_fr import PatternTagger, PatternAnalyzer
+import re
+import unicodedata
+from nltk.tokenize import WordPunctTokenizer
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+import numpy as np
+from PIL import Image
 
 screen_name = "1O17SQD"
 TWEET_MODE = 'extended'
@@ -100,7 +107,84 @@ def status(screen_name, api):
     df_metrics = pd.DataFrame(dict_metrics)
     return df_metrics
 
-df_metrics = status(screen_name, api)
+def cleaning_tweets(tweets):
+    """
+    Clean up a tweet by removing links, hashtags, mentions and emoticons.
+
+    Parameters
+    ----------
+    tweet : str
+        Tweet to clean up.
+
+    Returns
+    -------
+    str
+        Tweet cleaned up.
+    """
+    regex_pattern = re.compile(pattern="["
+                               u"\U0001F600-\U0001F64F"  # emoticons
+                               u"\U0001F300-\U0001F5FF"  # symbols & pictograms
+                               u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                               u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                               "]+", flags=re.UNICODE)
+    pattern = re.compile(r'(https?://)?(www\.)?(\w+\.)?(\w+)(\.\w+)(/.+)?')
+    tweets = re.sub(regex_pattern, '', tweets)  # replaces the pattern with ''
+    tweets = re.sub(pattern, '', tweets)
+    tweets = re.sub(r'@[^\s]+', '', tweets)
+    tweets = re.sub(r'#[^\s]+', '', tweets)
+    # Removes special characters and links
+    #tweets = re.sub(r'[^\w\s]', '', tweets)
+    tweets = re.sub(r'https?://[A-Za-z0-9./]+', '', tweets)
+    # Removes user mentions
+    tweets = re.sub(r'@[A-Za-z0-9]+', '', tweets)
+
+    token = WordPunctTokenizer()
+    words = token.tokenize(tweets)
+    result_words = [x for x in words]
+    return " ".join(result_words)
+
+def remove_emojis(tweets):
+    text = cleaning_tweets(tweets)
+    # Create an empty list to store the cleaned text
+    cleaned_text = []
+
+    # Scroll through each character of the text
+    for character in text:
+        # Use the `category` function of the `unicodedata` library to get the Unicode category of the character
+        character_category = unicodedata.category(character)
+        # If the character's Unicode category is not "So" (Symbol, Other), add the character to the clean text list
+        if character_category != "So":
+            cleaned_text.append(character)
+
+    # Join the characters in the cleaned text list into a string and return it
+    return "".join(cleaned_text)
+
+def process_tweets(tweets):
+    """
+    Processes tweets by removing empty words.
+
+    Parameters
+    ----------
+    tweets : list of str
+        List of tweets to process.
+
+    Returns
+    -------
+    list of str
+        List of processed tweets.
+    """
+    with open("french_stopwords.txt", "r", encoding="utf-8") as stopwords_file:
+        stopwords = []
+        for line in stopwords_file:
+            word = line.split("|")[0].strip()
+            stopwords.append(word)
+
+    cleaned_tweets = []
+    for tweet in tweets.lower().split():
+        if (tweet not in stopwords) and (len(tweet) > 1):
+            cleaned_tweets.append(remove_emojis(tweet))
+                      
+    return cleaned_tweets
 
 # Function for polarity score
 def polarity(tweet):
@@ -115,7 +199,9 @@ def sentimenttextblob(polarity):
         return "Neutre"
     else:
         return "Positif"
-
+    
+    
+df_metrics = status(screen_name, api)
 df_fig1 = df_metrics.groupby(['tweet_source', 'year'])['tweet_source'].count().reset_index(name='nb_source')
 df_fig2 = df_metrics.groupby(['year_month', 'year'])['nb_retweet'].sum().reset_index(name='nb_rt')
 df_fig3 = df_metrics.groupby(['year_month', 'year'])['nb_favorite'].sum().reset_index(name='nb_fav')
@@ -126,6 +212,8 @@ df_metrics['sentiment'] = df_metrics['polarity'].apply(sentimenttextblob)
 df_fig4 = df_metrics.groupby(['sentiment', 'year'])['sentiment'].count().reset_index(name='nb_sent')
 
 df_fig5 = df_metrics.groupby(['year_month', 'year'])['tweets_txt'].count().reset_index(name='nb_tweet')
+
+df_fig6 = df_metrics.copy()
 
 dash.register_page(__name__, path='/', title="Plotly App", description="Twitter Analytics")
 
@@ -178,7 +266,7 @@ layout = html.Div([
                     df_metrics['year'].min(),
                     df_metrics['year'].max(),
                     step=1,
-                    value=[df_metrics['year'].min()+1,  df_metrics['year'].max()-1],
+                    value=[df_metrics['year'].max()-2,  df_metrics['year'].max()-1],
                     marks={str(year): str(year) for year in df_metrics['year'].unique()},
                     id='year-slider')
             ], xs=12, sm=12, md=12, lg=6, xl=6),
@@ -197,6 +285,8 @@ layout = html.Div([
                 dbc.Card(dcc.Graph(id='nb_sent')),
             ], xs=12, sm=12, md=12, lg=6, xl=6)
         ]),
+        
+        html.Br(),
         
         dbc.Row([
             dbc.Col([
@@ -221,7 +311,7 @@ layout = html.Div([
     Output('wordcloud', 'figure'),
     Input('year-slider', 'value'))
 def update_figure(selected_year):
-    filtered_df = df_fig1[(df_fig1["year"] >= selected_year[0]) & (df_fig1["year"] <= selected_year[1])]
+    filtered_df = df_fig1[(df_fig1["year"] >= selected_year[0]) & (df_fig1["year"] < selected_year[1])]
     
     fig = px.pie(data_frame=filtered_df, names="tweet_source",
                  values="nb_source", hole=.5)
@@ -235,17 +325,17 @@ def update_figure(selected_year):
                            x=1), 
                        margin=dict(l=20, r=20, t=30, b=20))
     
-    filtered_df2 = df_fig2[(df_fig2["year"] >= selected_year[0]) & (df_fig2["year"] <= selected_year[1])]
+    filtered_df2 = df_fig2[(df_fig2["year"] >= selected_year[0]) & (df_fig2["year"] < selected_year[1])]
     fig2 = px.line(filtered_df2, x='year_month', y='nb_rt', template='ggplot2')
     fig2.update_layout(margin=dict(l=20, r=20, t=30, b=20),
-                       xaxis_title=None, yaxis_title=None)
+                       xaxis_title=None, yaxis_title=None, title='Retweets by Month')
     
-    filtered_df3 = df_fig3[(df_fig3["year"] >= selected_year[0]) & (df_fig3["year"] <= selected_year[1])]
+    filtered_df3 = df_fig3[(df_fig3["year"] >= selected_year[0]) & (df_fig3["year"] < selected_year[1])]
     fig3 = px.line(filtered_df3, x='year_month', y='nb_fav', template='ggplot2')
     fig3.update_layout(margin=dict(l=20, r=20, t=30, b=20),
-                       xaxis_title=None, yaxis_title=None)
+                       xaxis_title=None, yaxis_title=None, title='Likes by Month')
     
-    filtered_df4 = df_fig4[(df_fig4["year"] >= selected_year[0]) & (df_fig4["year"] <= selected_year[1])]
+    filtered_df4 = df_fig4[(df_fig4["year"] >= selected_year[0]) & (df_fig4["year"] < selected_year[1])]
     
     fig4 = px.pie(data_frame=filtered_df4, names='sentiment', values='nb_sent', hole=.5)
 
@@ -260,11 +350,25 @@ def update_figure(selected_year):
                        xaxis_title=None,
                        yaxis_title=None)
     
-    filtered_df5 = df_fig5[(df_fig5["year"] >= selected_year[0]) & (df_fig5["year"] <= selected_year[1])]
+    filtered_df5 = df_fig5[(df_fig5["year"] >= selected_year[0]) & (df_fig5["year"] < selected_year[1])]
     fig5 = px.bar(filtered_df5, x='year_month', y='nb_tweet', template='ggplot2')
     fig5.update_yaxes(tickangle=45)
     fig5.update_layout(margin=dict(l=20, r=20, t=30, b=20),
-                       xaxis_title=None, yaxis_title=None)
+                       xaxis_title=None, yaxis_title=None, title='Tweets by Month')
+    
+    tweets_filtered = ' '.join(list(df_fig6[(df_fig6["year"] >= selected_year[0]) & (df_fig6["year"] < selected_year[1])].tweets_txt))
+    tweets_procced = ' '.join(process_tweets(remove_emojis(tweets_filtered)))
+    
+    my_wordcloud = WordCloud(
+        background_color='white',
+        height=275,
+        max_words = 100
+    ).generate(tweets_procced)
+
+    fig_wordcloud = px.imshow(my_wordcloud, template='ggplot2')
+    fig_wordcloud.update_layout(margin=dict(l=0, r=0, t=15, b=15))
+    fig_wordcloud.update_xaxes(visible=False)
+    fig_wordcloud.update_yaxes(visible=False)
 
     
-    return fig, fig2, fig3, fig4, fig5
+    return fig, fig2, fig3, fig4, fig5, fig_wordcloud
