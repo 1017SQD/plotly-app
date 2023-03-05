@@ -6,7 +6,7 @@ import dash_bootstrap_components as dbc
 from dash import html
 
 
-app = dash.Dash(__name__, use_pages=True, external_stylesheets=[dbc.themes.DARKLY, dbc.icons.BOOTSTRAP],
+app = dash.Dash(__name__, use_pages=True, external_stylesheets=[dbc.themes.SLATE, dbc.icons.BOOTSTRAP],
                 suppress_callback_exceptions=True,
                 meta_tags=[{'name': 'viewport',
                             'content': 'width=device-width, initial-scale=1.0'}]
