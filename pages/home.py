@@ -5,8 +5,7 @@ from apps import navigation
 import pandas as pd
 import authentification
 import dash_bootstrap_components as dbc
-from textblob import TextBlob
-from textblob_fr import PatternTagger, PatternAnalyzer
+from vaderSentiment_fr.vaderSentiment import SentimentIntensityAnalyzer
 import re
 import unicodedata
 from nltk.tokenize import WordPunctTokenizer
@@ -84,6 +83,21 @@ def get_all_tweets(screen_name, api):
 
     return all_tweets
 
+# Function for polarity score
+def polarity_score(tweet):
+    SIA = SentimentIntensityAnalyzer()
+    return SIA.polarity_scores(tweet)['compound']
+
+# Function to get sentiment type
+def sentimentvader(tweet):
+    polarity = polarity_score(tweet)
+    if polarity < 0:
+        return "Négatif"
+    elif polarity == 0:
+        return "Neutre"
+    else:
+        return "Positif"
+
 def status(screen_name, api):
     tweet_source = []
     year = []
@@ -91,18 +105,21 @@ def status(screen_name, api):
     tweets_txt = []
     nb_retweet = []
     nb_fav = []
+    sentiment = []
     
     for status in get_all_tweets(screen_name, api):
         tweet_source.append(status.source)
         year.append(int(status.created_at.strftime("%Y")))
         year_month.append(status.created_at.strftime("%Y-%m"))
         tweets_txt.append(status.full_text)
+        sentiment.append(sentimentvader(status.full_text))
         nb_retweet.append(status.retweet_count)
         nb_fav.append(status.favorite_count)
         
     dict_metrics = {'tweet_source': tweet_source, 'year': year,
           'tweets_txt':tweets_txt, 'nb_retweet':nb_retweet,
-          'nb_favorite':nb_fav, 'year_month':year_month}
+          'nb_favorite':nb_fav, 'year_month':year_month,
+          'sentiment' : sentiment}
     
     df_metrics = pd.DataFrame(dict_metrics)
     return df_metrics
@@ -185,30 +202,15 @@ def process_tweets(tweets):
             cleaned_tweets.append(remove_emojis(tweet))
                       
     return cleaned_tweets
-
-# Function for polarity score
-def polarity(tweet):
-    return TextBlob(tweet, pos_tagger=PatternTagger(),
-                    analyzer=PatternAnalyzer()).sentiment[0]
-
-# Function to get sentiment type
-def sentimenttextblob(polarity):
-    if polarity < 0:
-        return "Négatif"
-    elif polarity == 0:
-        return "Neutre"
-    else:
-        return "Positif"
-    
-    
+        
 df_metrics = status(screen_name, api)
 df_fig1 = df_metrics.groupby(['tweet_source', 'year'])['tweet_source'].count().reset_index(name='nb_source')
 df_fig2 = df_metrics.groupby(['year_month', 'year'])['nb_retweet'].sum().reset_index(name='nb_rt')
 df_fig3 = df_metrics.groupby(['year_month', 'year'])['nb_favorite'].sum().reset_index(name='nb_fav')
 
 # using the functions to get the polarity and sentiment
-df_metrics['polarity'] = df_metrics['tweets_txt'].apply(polarity)
-df_metrics['sentiment'] = df_metrics['polarity'].apply(sentimenttextblob)
+# df_metrics['polarity'] = df_metrics['tweets_txt'].apply(polarity)
+# df_metrics['sentiment'] = df_metrics['polarity'].apply(sentimenttextblob)
 df_fig4 = df_metrics.groupby(['sentiment', 'year'])['sentiment'].count().reset_index(name='nb_sent')
 
 df_fig5 = df_metrics.groupby(['year_month', 'year'])['tweets_txt'].count().reset_index(name='nb_tweet')
@@ -297,6 +299,16 @@ layout = html.Div([
                 dbc.Card(dcc.Graph(id='wordcloud')),
             ], xs=12, sm=12, md=12, lg=6, xl=6),
         ]),
+        
+        dbc.Row([
+            dbc.Col([
+                dbc.Card(dcc.Graph(id='wc_pos')),
+            ], xs=12, sm=12, md=12, lg=6, xl=6),
+            
+            dbc.Col([
+                dbc.Card(dcc.Graph(id='wc_neg')),
+            ], xs=12, sm=12, md=12, lg=6, xl=6),
+        ]),
     ],
         fluid=True,
     )
@@ -309,6 +321,8 @@ layout = html.Div([
     Output('nb_sent', 'figure'),
     Output('nb_tweet', 'figure'),
     Output('wordcloud', 'figure'),
+    Output('wc_pos', 'figure'),
+    Output('wc_neg', 'figure'),
     Input('year-slider', 'value'))
 def update_figure(selected_year):
     filtered_df = df_fig1[(df_fig1["year"] >= selected_year[0]) & (df_fig1["year"] < selected_year[1])]
@@ -369,6 +383,41 @@ def update_figure(selected_year):
     fig_wordcloud.update_layout(margin=dict(l=0, r=0, t=15, b=15))
     fig_wordcloud.update_xaxes(visible=False)
     fig_wordcloud.update_yaxes(visible=False)
+    
+    tweets_filtered_pos = ' '.join(list(df_metrics[(df_metrics["year"] >= selected_year[0]) &
+                                            (df_metrics["year"] < selected_year[1]) &
+                                            (df_metrics["sentiment"] == "Positif")].tweets_txt))
+    
+    tweets_procced_pos = ' '.join(process_tweets(remove_emojis(tweets_filtered_pos)))
+    
+    my_wordcloud_pos = WordCloud(
+        background_color='white',
+        height=275,
+        max_words = 100
+    ).generate(tweets_procced_pos)
+
+    fig_wordcloud_pos = px.imshow(my_wordcloud_pos, template='ggplot2')
+    fig_wordcloud_pos.update_layout(margin=dict(l=0, r=0, t=15, b=15))
+    fig_wordcloud_pos.update_xaxes(visible=False)
+    fig_wordcloud_pos.update_yaxes(visible=False)
+    
+    tweets_filtered_neg = ' '.join(list(df_metrics[(df_metrics["year"] >= selected_year[0]) &
+                                            (df_metrics["year"] < selected_year[1]) &
+                                            (df_metrics["sentiment"] == "Négatif")].tweets_txt))
+    
+    tweets_procced_neg = ' '.join(process_tweets(remove_emojis(tweets_filtered_neg)))
+    
+    my_wordcloud_neg = WordCloud(
+        background_color='white',
+        height=275,
+        max_words = 100
+    ).generate(tweets_procced_neg)
+
+    fig_wordcloud_neg = px.imshow(my_wordcloud_neg, template='ggplot2')
+    fig_wordcloud_neg.update_layout(margin=dict(l=0, r=0, t=15, b=15))
+    fig_wordcloud_neg.update_xaxes(visible=False)
+    fig_wordcloud_neg.update_yaxes(visible=False)
+    
 
     
-    return fig, fig2, fig3, fig4, fig5, fig_wordcloud
+    return fig, fig2, fig3, fig4, fig5, fig_wordcloud, fig_wordcloud_pos, fig_wordcloud_neg
